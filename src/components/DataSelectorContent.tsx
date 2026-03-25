@@ -59,7 +59,8 @@ function DraggableTag({
 
   // Detect function pair (label ends with "()")
   const isFunctionPair = label.endsWith('()');
-  const cleanName = isFunctionPair ? label.replace('()', '') : label; // e.g. "length"
+  const rawName = isFunctionPair ? label.replace('()', '') : label;
+  const cleanName = rawName.replace(/([a-z])([A-Z])/g, '$1_$2').replace(/([A-Z]+)([A-Z][a-z])/g, '$1_$2').replace(/ /g, '_').toLowerCase();
   const funcOpenValue = isFunctionPair ? cleanName + '(' : label; // e.g. "length(" — used in TagInput
   const closeBracket = ')';
 

@@ -4,7 +4,7 @@ import { DataTag, DataTagValue } from './DataTag';
 import { getAppIconSvg, twColorToHex, getAppColorHex } from './app-icon-registry';
 import { getTagTooltip, getStepTagTooltip, TagTooltipData } from './tag-tooltip-registry';
 import { TagTooltipPortal } from './TagTooltip';
-import { Eye, Copy, Check } from 'lucide-react';
+import { ChevronRight, Copy, Check, ExternalLink } from 'lucide-react';
 
 // ─── Slash menu item registry ──────────────────────────────────────────────────
 // All slash command items for the TagInput autocomplete dropdown
@@ -200,6 +200,8 @@ export const TagInput = forwardRef<any, TagInputProps>((
   const [slashSelectedIdx, setSlashSelectedIdx] = useState(0);
   const slashAnchorRef = useRef<{ node: Node; offset: number } | null>(null);
   const slashMenuRef = useRef<HTMLDivElement>(null);
+  const bannerRef = useRef<HTMLDivElement>(null);
+  const isSelectingInBannerRef = useRef(false);
   const slashItemRefs = useRef<Map<number, HTMLElement>>(new Map());
   const [slashMenuPos, setSlashMenuPos] = useState<{ top: number; left: number; width: number }>({ top: 0, left: 0, width: 0 });
 
@@ -228,6 +230,7 @@ export const TagInput = forwardRef<any, TagInputProps>((
 
   // ── Focus state for preview banner ──────────────────────────────────────────
   const [isFocused, setIsFocused] = useState(false);
+  const [bannerScrolled, setBannerScrolled] = useState(false);
   const [previewOutput, setPreviewOutput] = useState('');
   const [hasFunctions, setHasFunctions] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -1063,21 +1066,13 @@ export const TagInput = forwardRef<any, TagInputProps>((
     if (tag.type === 'function' || tag.type === 'operator' || tag.type === 'keyword' || tag.type === 'variable') {
       const c = TAG_TYPE_COLORS[tag.type] || TAG_TYPE_COLORS.function;
       return `
-        <span class="inline-flex items-center gap-1 px-1.5 py-0.5 font-mono rounded-md mx-0.5 align-middle transition-colors text-xs" style="background:${c.bg};border:1px solid ${c.border};color:${c.text}">
-          <span>${tag.value}</span>
+        <span class="inline-flex items-center gap-1 py-0 rounded-none mx-0.5 align-middle transition-colors" style="background:${c.bg};color:${c.text};font-size:14px;padding-left:2px;padding-right:2px">
+          <span>${tag.value.replace(/([a-z])([A-Z])/g, '$1_$2').replace(/([A-Z]+)([A-Z][a-z])/g, '$1_$2').replace(/ /g, '_').toLowerCase()}</span>
         </span>
       `;
     }
 
-    // 2. Data Step Token Renderer - styled differently when inside function brackets
-    if (isInsideFunctionBrackets) {
-      // Inside function brackets: just plain text with no extra styling (styling applied to wrapper)
-      const numberPrefix = tag.stepNumber != null ? `${tag.stepNumber}. ` : '';
-      const label = `${numberPrefix}${tag.stepName}.${tag.path}`;
-      return label;
-    }
-
-    // Regular data tag styling (outside function brackets)
+    // Regular data tag styling (outside and inside function brackets)
     const appId = tag.appId || tag.id;
     const bgHex = getAppColorHex(appId) !== '#6b7280'
       ? getAppColorHex(appId)
@@ -1089,8 +1084,8 @@ export const TagInput = forwardRef<any, TagInputProps>((
     const label = `${numberPrefix}${tag.stepName}.${tag.path}`;
     
     return `
-      <span class="inline-flex items-center gap-1 px-2 py-0.5 bg-white border border-gray-300 text-gray-900 text-xs rounded-md whitespace-nowrap">
-        <span style="width:14px;height:14px;display:inline-flex;align-items:center;justify-content:center;border-radius:3px;color:white;background:${bgHex};flex-shrink:0">${iconSvg}</span>
+      <span class="inline-flex items-center gap-1 px-2 py-0 bg-white border border-gray-300 text-gray-900 text-xs rounded-md whitespace-nowrap">
+        <span style="width:12px;height:12px;display:inline-flex;align-items:center;justify-content:center;border-radius:3px;color:white;background:${bgHex};flex-shrink:0">${iconSvg}</span>
         <span>${label}</span>
       </span>
     `;
@@ -1153,8 +1148,8 @@ export const TagInput = forwardRef<any, TagInputProps>((
 
     const fc = TAG_TYPE_COLORS.function;
     tagSpan.innerHTML = `
-      <span class="inline-flex items-center gap-1 px-1.5 py-0.5 font-mono rounded-md mx-0.5 align-middle transition-colors text-xs" style="background:${fc.bg};border:1px solid ${fc.border};color:${fc.text}">
-        <span>${value}</span>
+      <span class="inline-flex items-center gap-1 py-0 rounded-none mx-0.5 align-middle transition-colors" style="background:${fc.bg};color:${fc.text};font-size:14px;padding-left:2px;padding-right:2px">
+        <span>${value.replace(/([a-z])([A-Z])/g, '$1_$2').replace(/([A-Z]+)([A-Z][a-z])/g, '$1_$2').replace(/ /g, '_').toLowerCase()}</span>
       </span>
     `;
 
@@ -1210,6 +1205,15 @@ export const TagInput = forwardRef<any, TagInputProps>((
   };
 
   const handleBlur = (e: React.FocusEvent<HTMLDivElement>) => {
+    if (isSelectingInBannerRef.current) {
+      isSelectingInBannerRef.current = false;
+      editableRef.current?.focus();
+      return;
+    }
+    if (bannerRef.current && e.relatedTarget && bannerRef.current.contains(e.relatedTarget as Node)) {
+      editableRef.current?.focus();
+      return;
+    }
     setIsFocused(false);
     
     // Close slash menu with delay to allow clicking items
@@ -2347,11 +2351,8 @@ export const TagInput = forwardRef<any, TagInputProps>((
                       onMouseLeave={() => hideTagTooltip()}
                     >
                       <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-xs font-mono ${s.bg} ${s.text}`}>
-                        {item.isPair ? item.label.replace('()', '') : item.label}
+                        {(item.isPair ? item.label.replace('()', '') : item.label).replace(/([a-z])([A-Z])/g, '$1_$2').replace(/([A-Z]+)([A-Z][a-z])/g, '$1_$2').replace(/ /g, '_').toLowerCase()}
                       </span>
-                      {item.isPair && (
-                        <span className="text-[10px] text-gray-400">function</span>
-                      )}
                     </button>
                   );
                 })}
@@ -2361,10 +2362,13 @@ export const TagInput = forwardRef<any, TagInputProps>((
         </div>
 
         {/* Footer hint */}
-        <div className="px-3 py-1.5 border-t border-gray-100 bg-gray-50/50 flex items-center gap-1">
-          <span className="text-[11px] text-gray-400">Press</span>
-          <kbd className="text-[10px] px-1 py-0.5 bg-gray-100 border border-gray-200 rounded text-gray-500">↵</kbd>
-          <span className="text-[11px] text-gray-400">to apply</span>
+        <div className="px-3 py-1.5 border-t border-gray-100 bg-gray-50/50 flex items-center justify-between gap-1">
+          <div className="flex items-center gap-1">
+            <span className="text-[11px] text-gray-400">Press</span>
+            <kbd className="text-[10px] px-1 py-0.5 bg-gray-100 border border-gray-200 rounded text-gray-500">↵</kbd>
+            <span className="text-[11px] text-gray-400">to apply</span>
+          </div>
+          <a href="#" className="flex items-center gap-1 text-[12px] text-purple-500 hover:text-purple-700 hover:underline">See All<ExternalLink size={11} /></a>
         </div>
       </div>,
       document.body
@@ -2372,7 +2376,7 @@ export const TagInput = forwardRef<any, TagInputProps>((
   };
 
   return (
-    <div ref={containerRef} className="relative" data-tag-input="true">
+    <div ref={containerRef} className={`relative ${isFocused ? 'z-50' : 'z-0'}`} style={{ isolation: 'isolate' }} data-tag-input="true">
       <style dangerouslySetInnerHTML={{
         __html: `
           .tag-input-editable:empty:before {
@@ -2439,13 +2443,13 @@ export const TagInput = forwardRef<any, TagInputProps>((
             hideTagTooltip();
           }
         }}
-        className={`tag-input-editable ${className} ${disabled ? 'cursor-not-allowed bg-gray-100 text-gray-700' : ''}`}
+        className={`tag-input-editable relative z-20 ${className} ${disabled ? 'cursor-not-allowed bg-gray-100 text-gray-700' : 'bg-white'}`}
         data-placeholder={placeholder}
         style={{
           minHeight: multiline ? `${rows * 1.5}em` : '38px',
           wordBreak: 'break-word',
           overflowWrap: 'break-word',
-          fontFamily: '"Cascadia Code", monospace',
+          fontFamily: 'inherit',
         }}
         suppressContentEditableWarning
       />
@@ -2453,17 +2457,17 @@ export const TagInput = forwardRef<any, TagInputProps>((
       {/* Preview results banner - shown when field is focused and has function tags */}
       {isFocused && hasFunctions && (
         <div 
-          className="absolute left-0 right-0 bg-green-50 border border-gray-300 rounded-md px-3 py-2 mt-2 shadow-sm z-20"
-          style={{ top: '100%' }}
-          onMouseDown={(e) => {
-            // Prevent blur on the input field when clicking the banner
-            e.preventDefault();
-          }}
+          ref={bannerRef}
+          className="absolute left-0 right-0 bg-green-50 border border-gray-400 border-t-0 rounded-b-md pt-0 shadow-sm z-10 flex flex-col"
+          style={{ top: 'calc(100% - 11px)', maxHeight: '200px' }}
+          onMouseDown={() => { isSelectingInBannerRef.current = true; }}
+          onMouseUp={() => { isSelectingInBannerRef.current = false; }}
         >
-          <div className="flex items-center justify-between mb-1">
-            <div className="flex items-center gap-2">
-              <Eye size={14} className="text-gray-700" />
-              <span className="text-xs font-medium text-gray-900">String Preview</span>
+          <div className="sticky top-0 bg-green-50 z-10 pt-[20px]" onMouseDown={(e) => e.preventDefault()}>
+          <div className="flex items-center justify-between mb-1 px-2">
+            <div className="flex items-center gap-0.5">
+              <ChevronRight size={14} className="text-green-600" strokeWidth={3} />
+              <span className="text-xs font-semibold text-gray-900">String Preview</span>
             </div>
             <button
               onClick={async () => {
@@ -2476,24 +2480,25 @@ export const TagInput = forwardRef<any, TagInputProps>((
                   console.error('Failed to copy:', err);
                 }
               }}
-              className="flex items-center gap-1 px-2 py-1 rounded hover:bg-green-100 transition-colors text-gray-700 hover:text-gray-900"
+              className="flex items-center p-1 rounded hover:bg-green-100 transition-colors text-gray-700 hover:text-gray-900"
               title="Copy to clipboard"
             >
               {copied ? (
-                <>
-                  <Check size={14} className="text-green-600" />
-                  <span className="text-xs font-medium text-green-600">Copied!</span>
-                </>
+                <Check size={14} className="text-black" />
               ) : (
-                <>
-                  <Copy size={14} />
-                  <span className="text-xs font-medium">Copy</span>
-                </>
+                <Copy size={14} />
               )}
             </button>
           </div>
-          <div className="mt-2 pt-2 border-t border-gray-300">
-            <span className="text-sm text-gray-800 whitespace-pre-wrap break-words" style={{ fontFamily: '"Cascadia Code", monospace' }}>
+          {bannerScrolled && <div className="border-t border-gray-300" />}
+          </div>
+          <div
+            className="overflow-y-auto px-2 pb-1"
+            style={{ overscrollBehavior: 'contain' }}
+            onWheel={(e) => e.stopPropagation()}
+            onScroll={(e) => setBannerScrolled((e.currentTarget as HTMLDivElement).scrollTop > 0)}
+          >
+            <span className="text-gray-800 whitespace-pre-wrap break-words" style={{ fontFamily: 'inherit', fontSize: '12px', lineHeight: '1' }}>
               {previewOutput && previewOutput.replace(/\u00A0/g, ' ').replace(/^\s+$/g, '').length > 0 ? previewOutput.replace(/\u00A0/g, ' ') : <span className="text-gray-400 italic">Empty</span>}
             </span>
           </div>
