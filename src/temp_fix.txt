@@ -1,0 +1,2 @@
+Line 1251 content:
+            console.warn(`⚠️ AI suggested invalid field name: \"${s.fieldName}\". Valid names are:`, currentFieldsToFill.map(f => f.name));

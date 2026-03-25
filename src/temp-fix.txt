@@ -1,0 +1,51 @@
+      // Skip if this value was already streamed
+      if (lastStreamedValues.current[fieldName] === value) return;
+      
+      // 🔥 Try dynamic refs first (for all apps)
+      const dynamicRef = dynamicFieldRefs.current[fieldName];
+      
+      if (dynamicRef) {
+        // Check if it's a TagInput (has insertText method)
+        if (dynamicRef.insertText && typeof dynamicRef.insertText === 'function') {
+          console.log('✅ Streaming to TagInput:', fieldName, 'Value:', value);
+          streamText(value, { current: dynamicRef }, fieldName);
+          lastStreamedValues.current[fieldName] = value;
+        }
+        // Check if it's a select element
+        else if (dynamicRef.tagName === 'SELECT') {
+          console.log('🔵 Setting select value:', fieldName, 'Value:', value);
+          const cleanValue = String(value).replace(/['\"]/g, '').trim();
+          setTimeout(() => {
+            setDynamicSelectValues(prev => ({ ...prev, [fieldName]: cleanValue }));
+            console.log('✅ Select value set to:', cleanValue);
+          }, 100);
+          lastStreamedValues.current[fieldName] = value;
+        }
+        return;
+      }
+      
+      // Fallback to Gmail refs (backward compatibility)
+      if (fieldName === 'to' && gmailToRef.current?.insertText) {
+        streamText(value, gmailToRef, fieldName);
+        lastStreamedValues.current[fieldName] = value;
+      } else if (fieldName === 'subject' && gmailSubjectRef.current?.insertText) {
+        streamText(value, gmailSubjectRef, fieldName);
+        lastStreamedValues.current[fieldName] = value;
+      } else if (fieldName === 'body' && gmailBodyRef.current?.insertText) {
+        streamText(value, gmailBodyRef, fieldName);
+        lastStreamedValues.current[fieldName] = value;
+      } else if (fieldName === 'action' && value) {
+        // For dropdown, set the value with a slight delay for smooth transition
+        console.log('🔵 Dropdown - Field:', fieldName, 'Value received:', JSON.stringify(value));
+        console.log('🔵 Valid options: send, read, draft');
+        
+        // Clean the value (remove quotes, trim spaces)
+        const cleanValue = String(value).replace(/['\"]/g, '').trim();
+        console.log('🔵 Clean value:', JSON.stringify(cleanValue));
+        
+        setTimeout(() => {
+          setGmailActionValue(cleanValue);
+          console.log('✅ Dropdown value set to:', JSON.stringify(cleanValue));
+        }, 100);
+        lastStreamedValues.current[fieldName] = value;
+      }
