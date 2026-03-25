@@ -1066,7 +1066,7 @@ export const TagInput = forwardRef<any, TagInputProps>((
     if (tag.type === 'function' || tag.type === 'operator' || tag.type === 'keyword' || tag.type === 'variable') {
       const c = TAG_TYPE_COLORS[tag.type] || TAG_TYPE_COLORS.function;
       return `
-        <span class="inline-flex items-center gap-1 py-0 rounded-none mx-0.5 align-middle transition-colors" style="background:${c.bg};color:${c.text};font-size:14px;padding-left:2px;padding-right:2px">
+        <span class="inline-flex items-center gap-1 py-0 rounded-none mx-0.5 align-middle transition-colors" style="background:${c.bg};color:${c.text};font-size:14px;padding-left:2px;padding-right:2px;line-height:1">
           <span>${tag.value.replace(/([a-z])([A-Z])/g, '$1_$2').replace(/([A-Z]+)([A-Z][a-z])/g, '$1_$2').replace(/ /g, '_').toLowerCase()}</span>
         </span>
       `;
@@ -1148,7 +1148,7 @@ export const TagInput = forwardRef<any, TagInputProps>((
 
     const fc = TAG_TYPE_COLORS.function;
     tagSpan.innerHTML = `
-      <span class="inline-flex items-center gap-1 py-0 rounded-none mx-0.5 align-middle transition-colors" style="background:${fc.bg};color:${fc.text};font-size:14px;padding-left:2px;padding-right:2px">
+      <span class="inline-flex items-center gap-1 py-0 rounded-none mx-0.5 align-middle transition-colors" style="background:${fc.bg};color:${fc.text};font-size:14px;padding-left:2px;padding-right:2px;line-height:1">
         <span>${value.replace(/([a-z])([A-Z])/g, '$1_$2').replace(/([A-Z]+)([A-Z][a-z])/g, '$1_$2').replace(/ /g, '_').toLowerCase()}</span>
       </span>
     `;
