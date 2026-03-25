@@ -2061,14 +2061,8 @@ export const TagInput = forwardRef<any, TagInputProps>((
       return;
     }
     
-    // منع Enter في حقول single-line
-    if (e.key === 'Enter' && !multiline) {
-      e.preventDefault();
-      return;
-    }
-    
-    // السماح بـ Enter في الحقول multiline لإنشاء سطر جديد
-    if (e.key === 'Enter' && multiline && !slashMenuOpen) {
+    // السماح بـ Enter في جميع الحقول لإنشاء سطر جديد
+    if (e.key === 'Enter' && !slashMenuOpen) {
       e.preventDefault();
       const selection = window.getSelection();
       if (selection && selection.rangeCount > 0) {
