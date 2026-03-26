@@ -5,6 +5,7 @@ import { getAppIconSvg, twColorToHex, getAppColorHex } from './app-icon-registry
 import { getTagTooltip, getStepTagTooltip, TagTooltipData } from './tag-tooltip-registry';
 import { TagTooltipPortal } from './TagTooltip';
 import { ChevronRight, Copy, Check, ExternalLink } from 'lucide-react';
+import { evaluateFormula, evaluateFormulaSegments, type FormulaSegment, type FormulaResult } from './formulaEngine';
 
 // ─── Slash menu item registry ──────────────────────────────────────────────────
 // All slash command items for the TagInput autocomplete dropdown
@@ -232,8 +233,11 @@ export const TagInput = forwardRef<any, TagInputProps>((
   const [isFocused, setIsFocused] = useState(false);
   const [bannerScrolled, setBannerScrolled] = useState(false);
   const [previewOutput, setPreviewOutput] = useState('');
+  const [previewSegments, setPreviewSegments] = useState<FormulaSegment[]>([]);
+  const [previewErrors, setPreviewErrors] = useState<string[]>([]);
   const [hasFunctions, setHasFunctions] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [copiedError, setCopiedError] = useState(false);
 
   /** Check if the field contains any function tags */
   const hasFunctionTags = useCallback((): boolean => {
@@ -255,58 +259,13 @@ export const TagInput = forwardRef<any, TagInputProps>((
     return false;
   }, []);
 
-  /** Walk the contentEditable DOM and extract evaluated output text (tags → display values) */
+  /** Walk the contentEditable DOM, parse into AST, and evaluate formula */
   const getEvaluatedOutput = useCallback((): string => {
     if (!editableRef.current) return '';
-    const parts: string[] = [];
-    const walk = (node: Node) => {
-      if (node.nodeType === Node.TEXT_NODE) {
-        parts.push(node.textContent || '');
-        return;
-      }
-      if (node.nodeType !== Node.ELEMENT_NODE) return;
-      const el = node as HTMLElement;
-      // Tag element
-      if (el.hasAttribute('data-tag')) {
-        try {
-          const tagData = JSON.parse(el.getAttribute('data-tag') || '{}');
-          if (tagData.type === 'step') {
-            // Data step tag → StepNumber. StepName.path = displayValue
-            const stepNum = tagData.stepNumber ? `${tagData.stepNumber}. ` : '';
-            const stepName = tagData.stepName || '';
-            const path = tagData.path || '';
-            // Try to find actual value from availableSteps
-            const step = availableSteps?.find(s => s.name === stepName || s.id === tagData.id);
-            let val = tagData.displayValue || '';
-            if (step && path) {
-              const pathParts = path.split('.');
-              let current: any = step.fields;
-              for (const p of pathParts) {
-                if (current && typeof current === 'object' && p in current) {
-                  current = current[p];
-                } else {
-                  current = undefined;
-                  break;
-                }
-              }
-              if (current !== undefined) val = String(current);
-            }
-            parts.push(val || `${stepNum}${stepName}.${path}`);
-          } else {
-            // Function/operator/keyword tag
-            parts.push(tagData.value || '');
-          }
-        } catch {
-          parts.push(el.textContent || '');
-        }
-        return;
-      }
-      // Recurse into children (for non-tag elements like line breaks, etc.)
-      if (el.tagName === 'BR') { parts.push('\n'); return; }
-      el.childNodes.forEach(walk);
-    };
-    editableRef.current.childNodes.forEach(walk);
-    return parts.join('');
+    const { segments, errors } = evaluateFormulaSegments(editableRef.current, availableSteps || []);
+    setPreviewSegments(segments);
+    setPreviewErrors(errors);
+    return segments.map(s => s.text).join('');
   }, [availableSteps]);
 
   // Build full searchable items list (formula functions only, no data step tags)
@@ -2449,55 +2408,115 @@ export const TagInput = forwardRef<any, TagInputProps>((
       />
 
       {/* Preview results banner - shown when field is focused and has function tags */}
-      {isFocused && hasFunctions && (
-        <div 
+      {isFocused && hasFunctions && (() => {
+        const hasErrors = previewErrors.length > 0;
+        const bannerBg = hasErrors ? 'bg-red-50' : 'bg-green-50';
+        const accentColor = hasErrors ? 'text-red-600' : 'text-green-600';
+        const hoverBg = hasErrors ? 'hover:bg-red-100' : 'hover:bg-green-100';
+        return (
+        <div
           ref={bannerRef}
-          className="absolute left-0 right-0 bg-green-50 border border-gray-400 border-t-0 rounded-b-md pt-0 shadow-sm z-10 flex flex-col"
-          style={{ top: 'calc(100% - 11px)', maxHeight: '200px' }}
+          className={`absolute left-0 right-0 ${bannerBg} border border-gray-400 border-t-0 rounded-b-md pt-0 shadow-sm z-10 flex flex-col`}
+          style={{ top: 'calc(100% - 11px)', maxHeight: '250px' }}
           onMouseDown={() => { isSelectingInBannerRef.current = true; }}
           onMouseUp={() => { isSelectingInBannerRef.current = false; }}
         >
-          <div className="sticky top-0 bg-green-50 z-10 pt-[20px]" onMouseDown={(e) => e.preventDefault()}>
-          <div className="flex items-center justify-between mb-1 px-2">
-            <div className="flex items-center gap-0.5">
-              <ChevronRight size={14} className="text-green-600" strokeWidth={3} />
-              <span className="text-xs font-semibold text-gray-900">String Preview</span>
+          {/* Fixed header: Error section + Preview header (not scrollable) */}
+          <div className={`flex-shrink-0 ${bannerBg} pt-[20px]`} onMouseDown={(e) => e.preventDefault()}>
+            {/* Error section — only shown when there are errors */}
+            {hasErrors && (
+              <>
+                <div className="flex items-center justify-between mb-1 px-2">
+                  <div className="flex items-center gap-1">
+                    <svg width="11" height="11" viewBox="0 0 16 16" fill="none" className="text-red-500 flex-shrink-0">
+                      <circle cx="8" cy="8" r="7" fill="currentColor"/>
+                      <path d="M5.5 5.5L10.5 10.5M10.5 5.5L5.5 10.5" stroke="white" strokeWidth="1.5" strokeLinecap="round"/>
+                    </svg>
+                    <span className="text-xs font-semibold text-gray-900">Error</span>
+                  </div>
+                  <button
+                    onClick={async () => {
+                      try {
+                        await navigator.clipboard.writeText(previewErrors.join('\n'));
+                        setCopiedError(true);
+                        setTimeout(() => setCopiedError(false), 2000);
+                      } catch (err) {
+                        console.error('Failed to copy:', err);
+                      }
+                    }}
+                    className="flex items-center p-1 rounded hover:bg-red-100 transition-colors text-gray-700 hover:text-gray-900"
+                    title="Copy error"
+                  >
+                    {copiedError ? (
+                      <Check size={14} className="text-black" />
+                    ) : (
+                      <Copy size={14} />
+                    )}
+                  </button>
+                </div>
+                <div className="px-2 pb-2">
+                  {previewErrors.map((errMsg, i) => (
+                    <div key={i} className="text-red-600" style={{ fontFamily: 'inherit', fontSize: '12px', lineHeight: '1.4' }}>
+                      {errMsg}
+                    </div>
+                  ))}
+                </div>
+                <div className="border-t border-gray-300" />
+              </>
+            )}
+
+            {/* Preview header */}
+            <div className={`flex items-center justify-between px-2 ${hasErrors ? 'py-1' : 'mb-1'}`}>
+              <div className="flex items-center gap-0.5">
+                <ChevronRight size={14} className={accentColor} strokeWidth={3} />
+                <span className="text-xs font-semibold text-gray-900">Preview</span>
+              </div>
+              <button
+                onClick={async () => {
+                  const textToCopy = previewOutput.replace(/\u00A0/g, ' ');
+                  try {
+                    await navigator.clipboard.writeText(textToCopy);
+                    setCopied(true);
+                    setTimeout(() => setCopied(false), 2000);
+                  } catch (err) {
+                    console.error('Failed to copy:', err);
+                  }
+                }}
+                className={`flex items-center p-1 rounded ${hoverBg} transition-colors text-gray-700 hover:text-gray-900`}
+                title="Copy to clipboard"
+              >
+                {copied ? (
+                  <Check size={14} className="text-black" />
+                ) : (
+                  <Copy size={14} />
+                )}
+              </button>
             </div>
-            <button
-              onClick={async () => {
-                const textToCopy = previewOutput.replace(/\u00A0/g, ' ');
-                try {
-                  await navigator.clipboard.writeText(textToCopy);
-                  setCopied(true);
-                  setTimeout(() => setCopied(false), 2000);
-                } catch (err) {
-                  console.error('Failed to copy:', err);
-                }
-              }}
-              className="flex items-center p-1 rounded hover:bg-green-100 transition-colors text-gray-700 hover:text-gray-900"
-              title="Copy to clipboard"
-            >
-              {copied ? (
-                <Check size={14} className="text-black" />
-              ) : (
-                <Copy size={14} />
-              )}
-            </button>
+            {bannerScrolled && <div className="border-t border-gray-300" />}
           </div>
-          {bannerScrolled && <div className="border-t border-gray-300" />}
-          </div>
+
+          {/* Scrollable preview content only */}
           <div
-            className="overflow-y-auto px-2 pb-1"
+            className="overflow-y-auto px-2 pb-1 min-h-0"
             style={{ overscrollBehavior: 'contain' }}
             onWheel={(e) => e.stopPropagation()}
             onScroll={(e) => setBannerScrolled((e.currentTarget as HTMLDivElement).scrollTop > 0)}
           >
             <span className="text-gray-800 whitespace-pre-wrap break-words" style={{ fontFamily: 'inherit', fontSize: '12px', lineHeight: '1' }}>
-              {previewOutput && previewOutput.replace(/\u00A0/g, ' ').replace(/^\s+$/g, '').length > 0 ? previewOutput.replace(/\u00A0/g, ' ') : <span className="text-gray-400 italic">Empty</span>}
+              {previewSegments.length > 0 && previewSegments.some(s => s.text.replace(/\u00A0/g, ' ').trim().length > 0) ? (
+                previewSegments.map((seg, i) =>
+                  seg.isError ? (
+                    <span key={i} className="text-red-500 font-medium">{seg.text}</span>
+                  ) : (
+                    <span key={i}>{seg.text.replace(/\u00A0/g, ' ')}</span>
+                  )
+                )
+              ) : <span className="text-gray-400 italic">Empty</span>}
             </span>
           </div>
         </div>
-      )}
+        );
+      })()}
       
       <div 
          ref={dropIndicatorRef}
